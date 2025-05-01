@@ -2,6 +2,9 @@
 
 A comprehensive tool for analyzing social media ads and user-generated content (UGC) videos using Azure OpenAI's GPT-4o, providing insights on marketing effectiveness, audience targeting, visual branding, and more. Now with vector database integration for RAG-based AI chatbot capabilities.
 
+[![Youtube Video](https://img.youtube.com/vi/doICR6wBOLU/0.jpg)](https://www.youtube.com/watch?v=doICR6wBOLU)
+
+
 ## Features
 
 - Frame extraction and processing from video files
@@ -50,9 +53,9 @@ A comprehensive tool for analyzing social media ads and user-generated content (
    ```
    createdb video_analytics
    ```
-5. Create a `.env` file based on the provided `env_example` with your API credentials and database connection:
+5. Create a `.env` file based on the provided `.env.example` with your API credentials and database connection:
    ```
-   cp env_example .env
+   cp .env.example .env
    # Edit .env with your credentials
    ```
    Example `.env` file:
