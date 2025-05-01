@@ -1,0 +1,20 @@
+# OpenAI API Key (required)
+OPENAI_API_KEY=your_openai_api_key
+
+# Database Configuration (required for vector DB features)
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/video_analytics
+
+# Chat model to use (defaults to gpt-4o if not specified)
+CHAT_MODEL=gpt-4o
+
+# Azure OpenAI Configuration (optional, if using Azure OpenAI instead of OpenAI)
+AZURE_OPENAI_ENDPOINT=https://your-endpoint.openai.azure.com/
+AZURE_OPENAI_API_KEY=your_azure_openai_api_key
+AZURE_OPENAI_API_VERSION=2023-05-15
+AZURE_OPENAI_DEPLOYMENT_NAME=your-deployment-name
+
+# Azure Whisper Configuration (optional, if using Azure Whisper)
+WHISPER_ENDPOINT=https://your-endpoint.openai.azure.com/
+WHISPER_API_KEY=your_whisper_api_key
+WHISPER_API_VERSION=2023-09-01-preview
+WHISPER_DEPLOYMENT_NAME=your-whisper-deployment 

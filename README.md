@@ -1,6 +1,6 @@
 # Social Media & UGC Video Analyzer
 
-A comprehensive tool for analyzing social media ads and user-generated content (UGC) videos using Azure OpenAI's GPT-4o, providing insights on marketing effectiveness, audience targeting, visual branding, and more.
+A comprehensive tool for analyzing social media ads and user-generated content (UGC) videos using Azure OpenAI's GPT-4o, providing insights on marketing effectiveness, audience targeting, visual branding, and more. Now with vector database integration for RAG-based AI chatbot capabilities.
 
 ## Features
 
@@ -18,6 +18,9 @@ A comprehensive tool for analyzing social media ads and user-generated content (
 - Segment-based analysis for longer ads
 - Consolidated analysis across all segments
 - Structured data output in JSON format
+- **NEW:** Vector database (PostgreSQL with pgvector) integration
+- **NEW:** Asynchronous video processing for faster analysis
+- **NEW:** CLI chatbot for interacting with analyzed videos
 
 ## Setup
 
@@ -26,13 +29,62 @@ A comprehensive tool for analyzing social media ads and user-generated content (
    ```
    pip install -r requirements.txt
    ```
-3. Create a `.env` file based on the provided `env_example` with your Azure OpenAI API credentials:
+3. Install PostgreSQL and pgvector extension:
+
+   ```
+   # For Ubuntu/Debian
+   sudo apt-get install postgresql postgresql-contrib
+
+   # For macOS with Homebrew
+   brew install postgresql
+
+   # Install pgvector extension (requires PostgreSQL 11+)
+   # Follow instructions at: https://github.com/pgvector/pgvector
+   ```
+
+4. Create a database for the video analytics:
+   ```
+   createdb video_analytics
+   ```
+5. Create a `.env` file based on the provided `env_example` with your API credentials and database connection:
    ```
    cp env_example .env
    # Edit .env with your credentials
    ```
+   Example `.env` file:
+   ```
+   OPENAI_API_KEY=your_openai_api_key
+   DATABASE_URL=postgresql://username:password@localhost:5432/video_analytics
+   CHAT_MODEL=gpt-4o
+   ```
 
 ## Usage
+
+### Async Video Analysis with Vector DB
+
+Process a video with asynchronous analysis and store in vector database:
+
+```bash
+python main.py --video your_video.mp4 --interval 5 --analysis-types general audience visual
+```
+
+Options:
+
+- `--video, -v`: Path to the video file (required)
+- `--output, -o`: Output directory for analysis (default: "analysis_output")
+- `--interval, -i`: Interval in seconds for segmenting the video (default: 10)
+- `--chat, -c`: Start chatbot after analysis
+- `--analysis-types, -a`: Types of analysis to perform (default: general audience visual)
+
+### AI Chatbot for Video Q&A
+
+After analyzing videos, you can interact with them using the chatbot:
+
+```bash
+python chat.py --video your_video.mp4
+```
+
+This will start a CLI chatbot that allows you to ask questions about the video content.
 
 ### Basic Analysis
 
@@ -85,17 +137,21 @@ analysis = analyze_video_with_multiple_perspectives(
 )
 ```
 
-### Comprehensive Analysis
+### Comprehensive Analysis with Vector DB
 
-Analyze a video from all marketing perspectives:
+Asynchronously analyze a video and store in vector database:
 
 ```python
-from analyzer import create_comprehensive_analysis
+import asyncio
+from main import async_comprehensive_analysis
+from config import PromptType
 
-full_analysis = create_comprehensive_analysis(
+results = asyncio.run(async_comprehensive_analysis(
     video_path='your_ad.mp4',
-    shot_interval=10  # 10-second segments
-)
+    output_dir='analysis_output',
+    analysis_types=[PromptType.GENERAL, PromptType.AUDIENCE, PromptType.VISUAL],
+    shot_interval=5  # 5-second segments
+))
 ```
 
 ## Project Structure
@@ -105,22 +161,31 @@ full_analysis = create_comprehensive_analysis(
 - `video_processor.py` - Video processing functions
 - `audio_processor.py` - Audio transcription functions
 - `analyzer.py` - Core analysis logic
-- `main.py` - Main execution and examples
+- `main.py` - Main execution and async video processing
+- `db_manager.py` - PostgreSQL with pgvector integration
+- `embeddings_manager.py` - Text embedding generation
+- `chatbot.py` - RAG-based AI chatbot for video Q&A
+- `chat.py` - CLI script for starting the chatbot
 - `requirements.txt` - Project dependencies
 
 ## Example
 
-Run the example script:
+Run the example script with chatbot:
 
-```
-python main.py
+```bash
+python main.py --video sample.mp4 --interval 5 --chat
 ```
 
-This will analyze the sample video with different approaches and save the results in the `analysis_output` directory.
+This will:
+
+1. Analyze the sample video in 5-second segments
+2. Store analysis in the PostgreSQL vector database
+3. Start the chatbot for interactive Q&A about the video
 
 ## Notes
 
-- This tool requires Azure OpenAI services with access to GPT-4o and Whisper models
+- This tool requires OpenAI API access (or Azure OpenAI services)
 - Processing longer videos can be expensive in terms of API costs
 - Default settings are optimized for short-form content (15-60 seconds)
 - Frame extraction rate and segment intervals can be adjusted for different video lengths
+- PostgreSQL with pgvector extension is required for vector database functionality

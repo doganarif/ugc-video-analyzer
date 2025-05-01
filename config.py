@@ -9,6 +9,9 @@ DEFAULT_FRAMES_PER_SECOND = 1
 DEFAULT_TEMPERATURE = 0.5
 RESIZE_OF_FRAMES = 4
 
+# Database configuration
+DEFAULT_DATABASE_URL = "postgresql://postgres:postgres@localhost:5432/video_analytics"
+
 # Define prompts as an enum for easier selection
 class PromptType(str, Enum):
     GENERAL = "general"
@@ -104,4 +107,25 @@ AOAI_MODEL_NAME = os.environ.get("AZURE_OPENAI_DEPLOYMENT_NAME")
 WHISPER_ENDPOINT = os.environ.get("WHISPER_ENDPOINT")
 WHISPER_APIKEY = os.environ.get("WHISPER_API_KEY")
 WHISPER_APIVERSION = os.environ.get("WHISPER_API_VERSION")
-WHISPER_MODEL_NAME = os.environ.get("WHISPER_DEPLOYMENT_NAME") 
+WHISPER_MODEL_NAME = os.environ.get("WHISPER_DEPLOYMENT_NAME")
+
+# Helper functions to get configuration values
+def get_openai_api_key():
+    """Get the OpenAI API key from environment variables"""
+    # First try to get the OpenAI API key directly
+    api_key = os.environ.get("OPENAI_API_KEY")
+    
+    # If not found, try to get the Azure OpenAI API key
+    if not api_key:
+        api_key = AOAI_APIKEY
+        
+    return api_key
+
+def get_database_url():
+    """Get the database connection URL from environment variables or use default"""
+    return os.environ.get("DATABASE_URL") or DEFAULT_DATABASE_URL
+
+# Chat model configuration
+def get_chat_model():
+    """Get the chat model name to use"""
+    return os.environ.get("CHAT_MODEL", "gpt-4o") 
