@@ -2,6 +2,7 @@ import os
 import json
 from enum import Enum
 from dotenv import load_dotenv
+from openai import AzureOpenAI
 
 # Default configuration
 DEFAULT_SHOT_INTERVAL = 10  # In seconds - reduced for shorter ad content
@@ -11,6 +12,9 @@ RESIZE_OF_FRAMES = 4
 
 # Database configuration
 DEFAULT_DATABASE_URL = "postgresql://postgres:postgres@localhost:5432/video_analytics"
+
+# AI API limits
+MAX_IMAGES_PER_REQUEST = 45  # Setting to 45 to be safe (below 50 limit)
 
 # Define prompts as an enum for easier selection
 class PromptType(str, Enum):
@@ -125,7 +129,41 @@ def get_database_url():
     """Get the database connection URL from environment variables or use default"""
     return os.environ.get("DATABASE_URL") or DEFAULT_DATABASE_URL
 
-# Chat model configuration
 def get_chat_model():
     """Get the chat model name to use"""
-    return os.environ.get("CHAT_MODEL", "gpt-4o") 
+    return os.environ.get("CHAT_MODEL", "gpt-4o")
+
+def validate_config():
+    """Validate that all required configuration is present"""
+    required_vars = [
+        ("AZURE_OPENAI_ENDPOINT", AOAI_ENDPOINT),
+        ("AZURE_OPENAI_API_KEY", AOAI_APIKEY),
+        ("AZURE_OPENAI_API_VERSION", AOAI_APIVERSION),
+        ("AZURE_OPENAI_DEPLOYMENT_NAME", AOAI_MODEL_NAME),
+        ("WHISPER_ENDPOINT", WHISPER_ENDPOINT),
+        ("WHISPER_API_KEY", WHISPER_APIKEY),
+        ("WHISPER_API_VERSION", WHISPER_APIVERSION),
+        ("WHISPER_DEPLOYMENT_NAME", WHISPER_MODEL_NAME)
+    ]
+    
+    missing = [name for name, value in required_vars if not value]
+    
+    if missing:
+        raise ValueError(f"Missing required environment variables: {', '.join(missing)}. Please check your .env file.")
+
+def get_aoai_client():
+    """Create and return an AzureOpenAI client for GPT models"""
+    return AzureOpenAI(
+        azure_deployment=AOAI_MODEL_NAME,
+        api_version=AOAI_APIVERSION,
+        azure_endpoint=AOAI_ENDPOINT,
+        api_key=AOAI_APIKEY
+    )
+
+def get_whisper_client():
+    """Create and return an AzureOpenAI client for Whisper"""
+    return AzureOpenAI(
+        api_version=WHISPER_APIVERSION,
+        azure_endpoint=WHISPER_ENDPOINT,
+        api_key=WHISPER_APIKEY
+    ) 

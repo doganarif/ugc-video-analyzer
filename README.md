@@ -22,6 +22,10 @@ A comprehensive tool for analyzing social media ads and user-generated content (
 - **NEW:** Asynchronous video processing for faster analysis
 - **NEW:** CLI chatbot for interacting with analyzed videos
 
+## Documentation
+
+- [LOGIC.md](LOGIC.md) - Contains Mermaid diagrams visualizing the application's business logic, component architecture, and data flow
+
 ## Setup
 
 1. Clone the repository
@@ -167,6 +171,7 @@ results = asyncio.run(async_comprehensive_analysis(
 - `chatbot.py` - RAG-based AI chatbot for video Q&A
 - `chat.py` - CLI script for starting the chatbot
 - `requirements.txt` - Project dependencies
+- `LOGIC.md` - Business logic diagrams and application architecture
 
 ## Example
 
@@ -182,6 +187,18 @@ This will:
 2. Store analysis in the PostgreSQL vector database
 3. Start the chatbot for interactive Q&A about the video
 
+## Business Logic
+
+The application follows a structured workflow:
+
+1. Video is split into segments for parallel processing
+2. Each segment undergoes frame extraction, audio transcription, and AI analysis
+3. Results are structured and stored in a vector database
+4. A full video analysis is performed and stored
+5. Optional chatbot interface leverages this data for user queries
+
+For detailed visualizations of the business logic, data models, and component architecture, see [LOGIC.md](LOGIC.md).
+
 ## Notes
 
 - This tool requires OpenAI API access (or Azure OpenAI services)
@@ -189,3 +206,56 @@ This will:
 - Default settings are optimized for short-form content (15-60 seconds)
 - Frame extraction rate and segment intervals can be adjusted for different video lengths
 - PostgreSQL with pgvector extension is required for vector database functionality
+
+## Contributing
+
+### Code Structure
+
+This project follows a modular approach, with separate modules for:
+
+1. **Processing** - Video and audio processing functionality (`video_processor.py`, `audio_processor.py`)
+2. **Analysis** - Core analysis logic (`analyzer.py`)
+3. **Database** - Data storage and vector search (`db_manager.py`, `embeddings_manager.py`)
+4. **User Interface** - CLI and chatbot functionality (`chat.py`, `chatbot.py`)
+5. **Configuration** - Settings and prompts (`config.py`)
+6. **Data Models** - Pydantic models for type safety (`models.py`)
+
+### Coding Standards
+
+Please follow these standards when contributing:
+
+1. **Type Hints** - Use Python type hints for all function parameters and return values
+2. **Documentation** - Add docstrings to all functions and classes
+3. **Error Handling** - Use appropriate exception handling
+4. **Logging** - Use the logging module instead of print statements
+5. **Factory Functions** - Use factory functions in `config.py` for client initialization
+6. **PEP 8** - Follow PEP 8 style guidelines
+
+### Development Setup
+
+1. Create a virtual environment:
+   ```
+   python -m venv .venv
+   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+   ```
+2. Install development dependencies:
+   ```
+   pip install -r requirements.txt
+   ```
+3. Set up pre-commit hooks:
+   ```
+   pip install pre-commit
+   pre-commit install
+   ```
+
+### Pull Request Process
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes following the coding standards
+4. Test your changes
+5. Submit a pull request
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.

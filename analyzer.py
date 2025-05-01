@@ -1,160 +1,159 @@
 import os
 import time
 import json
-from openai import AzureOpenAI
-
+import logging
 from config import (
-    AOAI_ENDPOINT, AOAI_APIKEY, AOAI_APIVERSION, AOAI_MODEL_NAME,
+    get_aoai_client, MAX_IMAGES_PER_REQUEST,
     DEFAULT_TEMPERATURE, SYSTEM_PROMPTS, USER_PROMPT, DEFAULT_FRAMES_PER_SECOND, 
-    RESIZE_OF_FRAMES, DEFAULT_SHOT_INTERVAL, PromptType
+    RESIZE_OF_FRAMES, DEFAULT_SHOT_INTERVAL, PromptType, AOAI_MODEL_NAME
 )
 from models import VideoAnalysis, ContentAnalysis
 from video_processor import process_video, split_video
 from audio_processor import process_audio
 
-# Create AOAI client for answer generation
-aoai_client = AzureOpenAI(
-    azure_deployment=AOAI_MODEL_NAME,
-    api_version=AOAI_APIVERSION,
-    azure_endpoint=AOAI_ENDPOINT,
-    api_key=AOAI_APIKEY
-)
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-def analyze_video(base64frames, system_prompt, user_prompt, transcription, temperature):
+def analyze_video(base64frames, system_prompt, user_prompt, transcription='', temperature=0.5):
     """
-    Analyze video frames using GPT-4o
+    Analyzes the frames from a video to provide a detailed description and analysis.
+    """
+    logger.info(f"Starting video analysis with temperature {temperature}")
     
-    Args:
-        base64frames: List of base64-encoded frames
-        system_prompt: System prompt for GPT-4o
-        user_prompt: User prompt for GPT-4o
-        transcription: Audio transcription
-        temperature: Temperature for GPT-4o
+    aoai_client = get_aoai_client()
+    
+    # Process frames in batches to stay within token limits
+    max_images_per_request = MAX_IMAGES_PER_REQUEST
+    
+    if max_images_per_request >= len(base64frames):
+        # If we can process all frames at once
+        logger.info(f"Processing all {len(base64frames)} frames at once")
         
-    Returns:
-        Analysis text from GPT-4o
-    """
-    print(f"Starting video analysis with system_prompt={system_prompt} and user_prompt={user_prompt}")
-    print(f"Number of frames to analyze: {len(base64frames)}")
-
-    # Maximum number of images per request to avoid API limitations
-    MAX_IMAGES_PER_REQUEST = 45  # Setting to 45 to be safe (below 50 limit)
-
-    # Initialize combined response
-    combined_response = ""
-
-    # Split frames into batches
-    num_batches = (len(base64frames) + MAX_IMAGES_PER_REQUEST - 1) // MAX_IMAGES_PER_REQUEST
-    print(f"Splitting frames into {num_batches} batches")
-
-    for batch_idx in range(num_batches):
-        batch_start = batch_idx * MAX_IMAGES_PER_REQUEST
-        batch_end = min((batch_idx + 1) * MAX_IMAGES_PER_REQUEST, len(base64frames))
-        batch_frames = base64frames[batch_start:batch_end]
-
-        print(f"Processing batch {batch_idx + 1}/{num_batches} with {len(batch_frames)} frames")
-
-        # Adjust the prompt for batch context
-        batch_prompt = user_prompt
-        if num_batches > 1:
-            batch_prompt = f"{user_prompt} (Analyzing frames {batch_start+1} to {batch_end} of {len(base64frames)})"
-
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": user_prompt}
+                ] + [{"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img}"}} for img in base64frames]
+            }
+        ]
+        
+        # Add transcription if available
+        if transcription:
+            messages[1]["content"].append({"type": "text", "text": f"\nTranscription: {transcription}"})
+        
         try:
-            if transcription and batch_idx == 0:  # Include the audio transcription only in the first batch
-                response = aoai_client.chat.completions.create(
-                    model=AOAI_MODEL_NAME,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": batch_prompt},
-                        {"role": "user", "content": [
-                            *map(lambda x: {"type": "image_url",
-                                            "image_url": {"url": f'data:image/jpg;base64,{x}', "detail": "auto"}},
-                                 batch_frames),
-                            {"type": "text",
-                             "text": f"The audio transcription is: {transcription if isinstance(transcription, str) else transcription.text}"}
-                        ]}
-                    ],
-                    temperature=temperature,
-                    max_tokens=4096
-                )
-            else:  # Without the audio transcription or subsequent batches
-                response = aoai_client.chat.completions.create(
-                    model=AOAI_MODEL_NAME,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": batch_prompt},
-                        {"role": "user", "content": [
-                            *map(lambda x: {"type": "image_url",
-                                            "image_url": {"url": f'data:image/jpg;base64,{x}', "detail": "auto"}},
-                                 batch_frames),
-                        ]}
-                    ],
-                    temperature=temperature,
-                    max_tokens=4096
-                )
-
-            json_response = json.loads(response.model_dump_json())
-            batch_response = json_response['choices'][0]['message']['content']
-
-            # Append to combined response
-            if batch_idx > 0:
-                combined_response += "\n\n--- CONTINUED ANALYSIS ---\n\n"
-            combined_response += batch_response
-
-            print(f"Batch {batch_idx + 1}/{num_batches} analyzed successfully")
-
-        except Exception as ex:
-            print(f'ERROR Video Analyzer Batch {batch_idx + 1}: {ex}')
-            combined_response += f"\n\nERROR in Batch {batch_idx + 1}: {ex}"
-
-    # If we did multiple batches, do a final consolidation analysis
-    if num_batches > 1:
-        try:
-            print("Performing final consolidation analysis...")
-            consolidation_prompt = f"""
-            The following is a multi-part analysis of a video ad, broken into {num_batches} sequential segments due to technical constraints.
-            Please synthesize this into a single coherent analysis, removing redundancies and creating a comprehensive overview.
-            Focus on the overall messaging, audience appeal, and marketing effectiveness across the entire sequence.
-            """
-
-            consolidation_response = aoai_client.chat.completions.create(
+            response = aoai_client.chat.completions.create(
                 model=AOAI_MODEL_NAME,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": consolidation_prompt},
-                    {"role": "user", "content": combined_response}
-                ],
+                messages=messages,
                 temperature=temperature,
-                max_tokens=4096
             )
-
-            json_consolidation = json.loads(consolidation_response.model_dump_json())
-            final_response = json_consolidation['choices'][0]['message']['content']
-            print("Final consolidation analysis completed successfully")
-            return final_response
-        except Exception as ex:
-            print(f'ERROR in consolidation analysis: {ex}')
-            # Return the concatenated analysis if consolidation fails
-            return combined_response
-
-    return combined_response
+            return response.choices[0].message.content
+        except Exception as e:
+            logger.error(f"Error in API call: {e}")
+            # Try again with a smaller batch
+            logger.info(f"Retrying with a smaller batch of frames")
+            max_images_per_request = len(base64frames) // 2
+    
+    # If we need to process in batches
+    logger.info(f"Processing {len(base64frames)} frames in {len(base64frames) // max_images_per_request + 1} batches")
+    
+    # Create batches of frames
+    batches = [base64frames[i:i + max_images_per_request] for i in range(0, len(base64frames), max_images_per_request)]
+    logger.info(f"Created {len(batches)} batches")
+    
+    combined_analysis = ""
+    
+    for i, batch in enumerate(batches):
+        logger.info(f"Processing batch {i+1}/{len(batches)} with {len(batch)} frames")
+        
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": f"{user_prompt} (Batch {i+1} of {len(batches)})"}
+                ] + [{"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img}"}} for img in batch]
+            }
+        ]
+        
+        # Add transcription if available and it's the first batch
+        if transcription and i == 0:
+            messages[1]["content"].append({"type": "text", "text": f"\nTranscription: {transcription}"})
+        
+        # Add previous analysis if not the first batch
+        if i > 0:
+            messages.append({
+                "role": "assistant",
+                "content": combined_analysis
+            })
+            messages.append({
+                "role": "user",
+                "content": f"Continue your analysis with the next set of frames. Consider what you've already analyzed and focus on new observations and developments."
+            })
+        
+        try:
+            response = aoai_client.chat.completions.create(
+                model=AOAI_MODEL_NAME,
+                messages=messages,
+                temperature=temperature,
+            )
+            
+            batch_analysis = response.choices[0].message.content
+            
+            if i == 0:
+                combined_analysis = batch_analysis
+            else:
+                combined_analysis += "\n\n" + batch_analysis
+        except Exception as e:
+            logger.error(f"Error in API call for batch {i+1}: {e}")
+            return f"Error in analysis: {str(e)}"
+    
+    # Final consolidation if we processed in multiple batches
+    if len(batches) > 1:
+        try:
+            logger.info("Creating final consolidated analysis")
+            
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+                {"role": "assistant", "content": combined_analysis},
+                {"role": "user", "content": "Please provide a final, consolidated analysis that integrates all of your observations into a cohesive whole. Remove any redundancies and organize your insights into a clear, well-structured analysis."}
+            ]
+            
+            response = aoai_client.chat.completions.create(
+                model=AOAI_MODEL_NAME,
+                messages=messages,
+                temperature=temperature,
+            )
+            
+            return response.choices[0].message.content
+        except Exception as e:
+            logger.error(f"Error in final consolidation: {e}")
+    
+    return combined_analysis
 
 def extract_structured_data(text_analysis, analysis_type, video_name, segment_timeframe=None, transcription=None):
     """
     Extract structured data from text analysis using GPT-4o
     
     Args:
-        text_analysis: Analysis text from GPT-4o
-        analysis_type: Type of analysis performed
-        video_name: Name of the video file
-        segment_timeframe: Timeframe of the analyzed segment
-        transcription: Audio transcription
+        text_analysis (str): Analysis text from GPT-4o
+        analysis_type (PromptType): Type of analysis performed
+        video_name (str): Name of the video file
+        segment_timeframe (str, optional): Timeframe of the analyzed segment
+        transcription (str, optional): Audio transcription
         
     Returns:
-        VideoAnalysis model with structured data
+        VideoAnalysis: Model with structured data
     """
-    print(f"Extracting structured data from text analysis for {video_name}")
+    logger.info(f"Extracting structured data from text analysis for {video_name}")
 
+    # Get AOAI client
+    aoai_client = get_aoai_client()
+    
     # Define the system prompt for extracting structured data
     system_prompt = f"""
     You are an expert in structured data extraction from social media ad and UGC video analysis text. 
@@ -360,7 +359,7 @@ def extract_structured_data(text_analysis, analysis_type, video_name, segment_ti
             video_analysis = VideoAnalysis(**structured_data)
             return video_analysis
         except Exception as validation_error:
-            print(f"Validation error details: {validation_error}")
+            logger.error(f"Validation error details: {validation_error}")
             # If we still have validation errors, let's try a more aggressive approach
             
             # Ensure all list fields exist and are proper lists
@@ -382,7 +381,7 @@ def extract_structured_data(text_analysis, analysis_type, video_name, segment_ti
             return video_analysis
 
     except Exception as ex:
-        print(f'ERROR extracting structured data: {ex}')
+        logger.error(f'ERROR extracting structured data: {ex}')
         # Create a minimal valid object as fallback
         return VideoAnalysis(
             video_name=video_name,
@@ -400,22 +399,22 @@ def execute_video_processing(shot_path, analysis_type, user_prompt=USER_PROMPT, 
     Process a video file with the specified analysis type
     
     Args:
-        shot_path: Path to the video file
-        analysis_type: Type of analysis to perform
-        user_prompt: User prompt for GPT-4o
-        temperature: Temperature for GPT-4o
-        frames_per_second: Number of frames to extract per second
-        analysis_dir: Directory to save analysis results
-        save_frames: Whether to save frames to disk
-        audio_transcription: Whether to transcribe audio
-        resize: Factor to resize frames by
-        segment_timeframe: Timeframe of the analyzed segment
-        max_frames: Maximum number of frames to process
+        shot_path (str): Path to the video file
+        analysis_type (PromptType): Type of analysis to perform
+        user_prompt (str, optional): User prompt for GPT-4o
+        temperature (float, optional): Temperature for GPT-4o
+        frames_per_second (float, optional): Number of frames to extract per second
+        analysis_dir (str, optional): Directory to save analysis results
+        save_frames (bool, optional): Whether to save frames to disk
+        audio_transcription (bool, optional): Whether to transcribe audio
+        resize (int, optional): Factor to resize frames by
+        segment_timeframe (str, optional): Timeframe of the analyzed segment
+        max_frames (int, optional): Maximum number of frames to process
         
     Returns:
-        VideoAnalysis model with analysis results
+        VideoAnalysis: Model with analysis results
     """
-    print(f"Starting video processing for shot {shot_path} with analysis_type={analysis_type.value}")
+    logger.info(f"Starting video processing for shot {shot_path} with analysis_type={analysis_type.value}")
 
     # Ensure analysis directory exists
     os.makedirs(analysis_dir, exist_ok=True)
@@ -424,7 +423,7 @@ def execute_video_processing(shot_path, analysis_type, user_prompt=USER_PROMPT, 
     system_prompt = SYSTEM_PROMPTS[analysis_type]
 
     # Extract frames at the specified rate
-    print(f"Extracting frames from {shot_path}")
+    logger.info(f"Extracting frames from {shot_path}")
     start_time = time.time()
     if save_frames:
         output_dir = os.path.join(analysis_dir, 'frames')
@@ -440,43 +439,46 @@ def execute_video_processing(shot_path, analysis_type, user_prompt=USER_PROMPT, 
         max_frames=max_frames  # Limit maximum frames to avoid API issues
     )
     end_time = time.time()
-    print(f'\t>>>> Frames extraction took {(end_time - start_time):.3f} seconds <<<<')
+    logger.info(f'\t>>>> Frames extraction took {(end_time - start_time):.3f} seconds <<<<')
 
     # Extract the transcription of the audio
     transcription = ''
     if audio_transcription:
-        print(f"Transcribing audio from {shot_path}")
+        logger.info(f"Transcribing audio from {shot_path}")
         start_time = time.time()
         transcription = process_audio(shot_path)
         end_time = time.time()
-        print(f'Transcription: [{transcription}]')
-        print(f'\t>>>> Audio transcription took {(end_time - start_time):.3f} seconds <<<<')
+        logger.info(f'Transcription: [{transcription}]')
+        logger.info(f'\t>>>> Audio transcription took {(end_time - start_time):.3f} seconds <<<<')
     else:
-        print(f"Skipping audio transcription")
+        logger.info(f"Skipping audio transcription")
 
+    # Get AOAI client
+    aoai_client = get_aoai_client()
+    
     # Analyze the video frames and the audio transcription with GPT-4o
-    print(f"Analyzing frames with {AOAI_MODEL_NAME} using {analysis_type.value} prompt")
-    print(f"Processing {len(base64frames)} frames in batches")
+    logger.info(f"Analyzing frames with {AOAI_MODEL_NAME} using {analysis_type.value} prompt")
+    logger.info(f"Processing {len(base64frames)} frames in batches")
     start_time = time.time()
     text_analysis = analyze_video(base64frames, system_prompt, user_prompt, transcription, temperature)
     end_time = time.time()
-    print(f'\t>>>> Analysis with {AOAI_MODEL_NAME} took {(end_time - start_time):.3f} seconds <<<<')
+    logger.info(f'\t>>>> Analysis with {AOAI_MODEL_NAME} took {(end_time - start_time):.3f} seconds <<<<')
 
     # Extract structured data from the text analysis
-    print(f"Extracting structured data from text analysis")
+    logger.info(f"Extracting structured data from text analysis")
     start_time = time.time()
     structured_data = extract_structured_data(text_analysis, analysis_type,
                                               os.path.basename(shot_path),
                                               segment_timeframe, transcription)
     end_time = time.time()
-    print(f'\t>>>> Structured data extraction took {(end_time - start_time):.3f} seconds <<<<')
+    logger.info(f'\t>>>> Structured data extraction took {(end_time - start_time):.3f} seconds <<<<')
 
     # Save the analysis to a JSON file in the analysis directory
     analysis_filename = os.path.join(analysis_dir,
                                      f"{os.path.splitext(os.path.basename(shot_path))[0]}_{analysis_type.value}_analysis.json")
     with open(analysis_filename, 'w') as json_file:
         json.dump(structured_data.model_dump(), json_file, indent=4)
-    print(f"Analysis saved as: {analysis_filename}")
+    logger.info(f"Analysis saved as: {analysis_filename}")
 
     return structured_data
 
@@ -524,7 +526,7 @@ def analyze_video_with_multiple_perspectives(video_path, output_dir='analysis_ou
 
         # Analyze each shot with each analysis type
         for analysis_type in analysis_types:
-            print(f"\n-- Processing shot {shot_file} with {analysis_type.value} analysis --")
+            logger.info(f"\n-- Processing shot {shot_file} with {analysis_type.value} analysis --")
 
             analysis_result = execute_video_processing(
                 shot_path=shot_file,
@@ -556,7 +558,7 @@ def analyze_video_with_multiple_perspectives(video_path, output_dir='analysis_ou
         json.dump(serializable_results, f, indent=4)
 
     # Generate a consolidated analysis
-    consolidated_analysis = create_consolidated_analysis(video_path, results, output_dir)
+    create_consolidated_analysis(video_path, results, output_dir)
     
     return results
 
@@ -572,7 +574,7 @@ def create_consolidated_analysis(video_path, results, output_dir):
     Returns:
         Consolidated analysis as a JSON object
     """
-    print("\n--- Creating consolidated analysis of all shots ---")
+    logger.info("\n--- Creating consolidated analysis of all shots ---")
     
     # Prepare data for the consolidation prompt
     consolidated_data = {
@@ -643,8 +645,8 @@ def create_consolidated_analysis(video_path, results, output_dir):
     
     try:
         # Generate the consolidated analysis
-        print("Generating consolidated analysis...")
-        response = aoai_client.chat.completions.create(
+        logger.info("Generating consolidated analysis...")
+        response = get_aoai_client().chat.completions.create(
             model=AOAI_MODEL_NAME,
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -660,7 +662,7 @@ def create_consolidated_analysis(video_path, results, output_dir):
         consolidated_file = os.path.join(output_dir, f"{os.path.splitext(os.path.basename(video_path))[0]}_consolidated_analysis.txt")
         with open(consolidated_file, 'w') as f:
             f.write(consolidated_text)
-        print(f"Consolidated analysis saved as: {consolidated_file}")
+        logger.info(f"Consolidated analysis saved as: {consolidated_file}")
         
         # Also save as JSON for structured access
         consolidated_json_file = os.path.join(output_dir, f"{os.path.splitext(os.path.basename(video_path))[0]}_final_analysis.json")
@@ -680,7 +682,7 @@ def create_consolidated_analysis(video_path, results, output_dir):
         7. effectiveness_score: A subjective rating from 1-10 of overall effectiveness
         """
         
-        structured_response = aoai_client.chat.completions.create(
+        structured_response = get_aoai_client().chat.completions.create(
             model=AOAI_MODEL_NAME,
             messages=[
                 {"role": "system", "content": system_prompt_structured},
@@ -697,12 +699,12 @@ def create_consolidated_analysis(video_path, results, output_dir):
         
         with open(consolidated_json_file, 'w') as f:
             json.dump(consolidated_structured, f, indent=4)
-        print(f"Structured consolidated analysis saved as: {consolidated_json_file}")
+        logger.info(f"Structured consolidated analysis saved as: {consolidated_json_file}")
         
         return consolidated_structured
         
     except Exception as ex:
-        print(f"ERROR creating consolidated analysis: {ex}")
+        logger.error(f"ERROR creating consolidated analysis: {ex}")
         return {"error": str(ex), "video_name": os.path.basename(video_path)}
 
 def create_comprehensive_analysis(video_path, output_dir='analysis_output', shot_interval=DEFAULT_SHOT_INTERVAL,

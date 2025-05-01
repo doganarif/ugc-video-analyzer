@@ -2,7 +2,7 @@ import asyncio
 import os
 import argparse
 import json
-from openai import AzureOpenAI
+import logging
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
@@ -10,46 +10,52 @@ from rich.prompt import Prompt
 
 from db_manager import DBManager
 from embeddings_manager import EmbeddingsManager
-from config import get_openai_api_key, get_chat_model, get_database_url
+from config import get_aoai_client, get_openai_api_key, get_chat_model, get_database_url
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 console = Console()
 
 class VideoChatbot:
     """CLI Chatbot for interacting with analyzed video content"""
 
-    def __init__(self, video_name: str, api_key=None, model=None):
-        """Initialize the chatbot with video name and OpenAI credentials"""
+    def __init__(self, video_name: str, api_key=None, model=None, debug_mode=False):
+        """
+        Initialize the chatbot with video name and OpenAI credentials
+        
+        Args:
+            video_name (str): Name of the video to chat about
+            api_key (str, optional): OpenAI API key
+            model (str, optional): Model name to use
+            debug_mode (bool, optional): Whether to show debug info
+        """
         self.video_name = video_name
         self.api_key = api_key or get_openai_api_key()
         self.model = model or get_chat_model()
-
-        # Get Azure OpenAI endpoint and API version from environment variables
-        self.azure_endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT")
-        self.azure_api_version = os.environ.get("AZURE_OPENAI_API_VERSION")
-        self.azure_deployment = os.environ.get("AZURE_OPENAI_DEPLOYMENT_NAME")
-
-        # Use AzureOpenAI client instead of OpenAI
-        self.openai_client = AzureOpenAI(
-            azure_deployment=self.azure_deployment,
-            api_version=self.azure_api_version,
-            azure_endpoint=self.azure_endpoint,
-            api_key=self.api_key
-        )
-
+        
+        # Use the factory function to get the client
+        self.openai_client = get_aoai_client()
+        
         self.db_manager = DBManager(get_database_url())
         self.embeddings_manager = EmbeddingsManager(
             api_key=self.api_key,
-            use_azure=True,
-            azure_endpoint=self.azure_endpoint,
-            azure_api_version=self.azure_api_version,
-            azure_deployment="text-embedding-3-large"  # Make sure to use a valid embedding model
+            use_azure=True
         )
         self.conversation_history = []
-        self.debug_mode = True  # Set to True to see detailed debugging info
+        self.debug_mode = debug_mode
+        logger.info(f"Initialized chatbot for video {video_name} with model {self.model}")
 
     async def setup(self):
         """Setup the database and connection pool"""
-        await self.db_manager.setup_database()
+        try:
+            await self.db_manager.setup_database()
+            logger.info("Database setup complete")
+        except Exception as e:
+            logger.error(f"Database setup failed: {e}")
+            console.print(f"[bold red]Error setting up database: {e}[/bold red]")
+            raise
         
     async def get_all_video_documents(self, limit=10):
         """Get all available video documents for the current video"""
@@ -168,8 +174,7 @@ class VideoChatbot:
             query_embedding = await self.embeddings_manager.generate_embedding_async(search_query)
             vector_results = await self.db_manager.search_similar(query_embedding, limit=max_results)
             
-            # Check if we got good vector results (similarity > 0.3)
-            good_vector_results = [r for r in vector_results if r.get('similarity', 0) > 0.3]
+            good_vector_results = [r for r in vector_results if r.get('similarity', 0) > 0.001]
             
             if good_vector_results:
                 console.print(f"[dim]Found {len(good_vector_results)} relevant results with vector search[/dim]")
